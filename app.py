@@ -23,7 +23,8 @@ app.secret_key = "billsmart-modern-secret"  # you can change this to any random 
 # Google OAuth2 config
 GOOGLE_CLIENT_ID = "736005593161-e13hjvcqlsepnpgrda18n6jl8f2rbnlp.apps.googleusercontent.com"
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-GOOGLE_REDIRECT_URI = "http://localhost:5000/google/callback"
+GOOGLE_REDIRECT_URI = "https://billsmartapp.onrender.com/google/callback"
+
 
 # SQLite DB configuration
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
