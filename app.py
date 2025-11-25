@@ -509,7 +509,6 @@ def export_excel():
 
 @app.route("/google/callback")
 def login_google_callback():
-    # Check state to avoid CSRF issues
     state = session.get("state")
     incoming_state = request.args.get("state")
 
@@ -517,25 +516,36 @@ def login_google_callback():
         session.pop("state", None)
         return redirect(url_for("login_google"))
 
-    flow = Flow.from_client_secrets_file(
-        "client_secret_google.json",
+    # Build Flow from ENV variables (NO JSON FILE)
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [GOOGLE_REDIRECT_URI]
+            }
+        },
         scopes=[
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/userinfo.profile",
             "openid"
         ],
-        state=state,
-        redirect_uri=GOOGLE_REDIRECT_URI
+        state=state
     )
+
+    flow.redirect_uri = GOOGLE_REDIRECT_URI
     flow.fetch_token(authorization_response=request.url)
 
     credentials = flow.credentials
+
     request_session = requests.Session()
     token_request = google.auth.transport.requests.Request(session=request_session)
     id_info = google.oauth2.id_token.verify_oauth2_token(
         credentials._id_token,
         token_request,
-        GOOGLE_CLIENT_ID
+        os.getenv("GOOGLE_CLIENT_ID")
     )
 
     google_email = id_info.get("email")
@@ -545,7 +555,6 @@ def login_google_callback():
     user = User.query.filter_by(email=google_email).first()
 
     if not user:
-        # Auto-register Google user
         user = User(
             name=google_name,
             email=google_email,
@@ -554,12 +563,12 @@ def login_google_callback():
         db.session.add(user)
         db.session.commit()
 
-    # Use your existing session-based login system
     session["user_id"] = user.id
     session["user_name"] = user.name
     flash(f"Logged in with Google as {user.name}", "success")
 
     return redirect(url_for("dashboard"))
+
 
 
 
