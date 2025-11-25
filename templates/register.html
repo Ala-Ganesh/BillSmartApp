@@ -1,0 +1,38 @@
+
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-5">
+        <div class="card app-card shadow-lg">
+            <div class="card-body">
+                <h3 class="card-title mb-3 text-center">Create your account ✨</h3>
+                <p class="text-muted text-center mb-4">Start tracking and managing your monthly bills.</p>
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Full Name</label>
+                        <input name="name" type="text" class="form-control" required placeholder="Your Name">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input name="email" type="email" class="form-control" required placeholder="you@example.com">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input name="password" type="password" class="form-control" required placeholder="Choose a password">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Confirm Password</label>
+                        <input name="confirm_password" type="password" class="form-control" required placeholder="Re-enter password">
+                    </div>
+                    <button class="btn btn-primary w-100 mb-2" type="submit">
+                        <i class="fa-solid fa-user-plus me-1"></i>Sign Up
+                    </button>
+                    <p class="text-center small mb-0">
+                        Already have an account? <a href="{{ url_for('login') }}">Log in</a>
+                    </p>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

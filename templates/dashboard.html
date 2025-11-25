@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2 class="fw-bold mb-1">Dashboard</h2>
+        <p class="text-muted mb-0">Hi {{ user.name }}, here is a quick snapshot of your bills.</p>
+    </div>
+    <div class="col-md-4 text-md-end mt-3 mt-md-0">
+        <a href="{{ url_for('add_bill') }}" class="btn btn-primary me-2 mb-2">
+            <i class="fa-solid fa-circle-plus me-1"></i>Add Bill
+        </a>
+        <a href="{{ url_for('bills') }}" class="btn btn-outline-light mb-2">
+            <i class="fa-solid fa-list me-1"></i>View All Bills
+        </a>
+        <a href="{{ url_for('send_reminders') }}" class="btn btn-outline-warning mb-2">
+            <i class="fa-solid fa-bell me-1"></i>Send Email Reminders
+        </a>
+        <a href="{{ url_for('send_whatsapp') }}" class="btn btn-success mb-2">
+            <i class="fa-brands fa-whatsapp me-1"></i>Send WhatsApp Reminders
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card stats-card shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <p class="stats-label mb-1">Total Amount</p>
+                        <h3 class="stats-value">₹ {{ "%.2f"|format(total_amount) }}</h3>
+                    </div>
+                    <div class="stats-icon bg-primary-subtle text-primary">
+                        <i class="fa-solid fa-indian-rupee-sign"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stats-card shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <p class="stats-label mb-1">Pending Bills</p>
+                        <h3 class="stats-value">{{ pending_count }}</h3>
+                    </div>
+                    <div class="stats-icon bg-warning-subtle text-warning">
+                        <i class="fa-solid fa-hourglass-half"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stats-card shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <p class="stats-label mb-1">Paid Bills</p>
+                        <h3 class="stats-value">{{ paid_count }}</h3>
+                    </div>
+                    <div class="stats-icon bg-success-subtle text-success">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New charts row -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card stats-card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Category-wise expenses</h5>
+                <canvas id="categoryChart"></canvas>
+                {% if not category_labels %}
+                    <p class="text-muted small mt-2">No data yet. Add some bills to see this chart.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card stats-card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Monthly expense trend</h5>
+                <canvas id="monthChart"></canvas>
+                {% if not month_labels %}
+                    <p class="text-muted small mt-2">No data yet. Add some bills to see this chart.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if bills %}
+<h5 class="mb-3">Upcoming bills</h5>
+<div class="card shadow-sm">
+    <div class="card-body table-responsive">
+        <table class="table align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Amount (₹)</th>
+                    <th>Category</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in bills[:5] %}
+                <tr>
+                    <td>{{ b.title }}</td>
+                    <td>₹ {{ "%.2f"|format(b.amount) }}</td>
+                    <td>{{ b.category }}</td>
+                    <td>{{ b.due_date }}</td>
+                    <td>
+                        {% if b.status == "paid" %}
+                            <span class="badge bg-success">Paid</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">Pending</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if bills|length > 5 %}
+            <div class="text-end mt-2">
+                <a href="{{ url_for('bills') }}" class="small">View all ({{ bills|length }}) →</a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="text-center text-muted mt-5">
+    <i class="fa-regular fa-face-smile-beam fa-2x mb-3"></i>
+    <p class="mb-1">No bills added yet.</p>
+    <p class="small mb-3">Start by adding your first bill to see insights here.</p>
+    <a href="{{ url_for('add_bill') }}" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-circle-plus me-1"></i>Add your first bill
+    </a>
+</div>
+{% endif %}
+
+<script>
+    // Data from Flask
+    const categoryLabels = {{ category_labels|tojson }};
+    const categoryValues = {{ category_values|tojson }};
+    const monthLabels = {{ month_labels|tojson }};
+    const monthValues = {{ month_values|tojson }};
+
+    // Category-wise chart (Pie / Doughnut)
+    const categoryCanvas = document.getElementById('categoryChart');
+    if (categoryCanvas && categoryLabels.length > 0) {
+        new Chart(categoryCanvas, {
+            type: 'doughnut',
+            data: {
+                labels: categoryLabels,
+                datasets: [{
+                    data: categoryValues,
+                }]
+            },
+            options: {
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#f8f9fa'
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Month-wise chart (Line)
+    const monthCanvas = document.getElementById('monthChart');
+    if (monthCanvas && monthLabels.length > 0) {
+        new Chart(monthCanvas, {
+            type: 'line',
+            data: {
+                labels: monthLabels,
+                datasets: [{
+                    data: monthValues,
+                    fill: false,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#f8f9fa' },
+                        grid: { display: false }
+                    },
+                    y: {
+                        ticks: { color: '#f8f9fa' },
+                        grid: { color: 'rgba(255,255,255,0.1)' }
+                    }
+                }
+            }
+        });
+    }
+</script>
+
+<!-- 🔥 Creator Signature Footer -->
+<footer style="text-align: center; margin-top: 40px; padding: 15px; font-size: 15px; color: #999;">
+    <p>© Developed by <strong>ALA GANESH</strong></p>
+    <p><strong>Nadendla (V) & (M), Palnadu, AP</strong></p>
+</footer>
+
+{% endblock %}
