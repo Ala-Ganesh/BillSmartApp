@@ -148,22 +148,36 @@ def register():
     return render_template("register.html")
 @app.route("/login/google")
 def login_google():
-    flow = Flow.from_client_secrets_file(
-        "client_secret_google.json",
+    from google_auth_oauthlib.flow import Flow
+
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [GOOGLE_REDIRECT_URI]
+            }
+        },
         scopes=[
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/userinfo.profile",
             "openid"
-        ],
-        redirect_uri=GOOGLE_REDIRECT_URI
+        ]
     )
+
+    flow.redirect_uri = GOOGLE_REDIRECT_URI
+
     auth_url, state = flow.authorization_url(
         prompt="consent",
         access_type="offline",
         include_granted_scopes="true"
     )
+
     session["state"] = state
     return redirect(auth_url)
+
 
 
 
