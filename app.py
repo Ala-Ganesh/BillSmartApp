@@ -1,65 +1,163 @@
-from google_auth_oauthlib.flow import Flow
-import google.auth.transport.requests
-import google.oauth2.id_token
-import requests
+# app.py — cleaned & ready to paste
 import os
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from datetime import datetime, date, timedelta
 from collections import defaultdict
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from google_auth_oauthlib.flow import Flow
+import google.auth.transport.requests
+import google.oauth2.id_token
+
+from flask import Flask, render_template, request, redirect, url_for, session, flash, make_response
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # -------------------------------------------------
-# Flask app & Database setup
+# Flask app setup
 # -------------------------------------------------
 app = Flask(__name__)
+# use SECRET_KEY from environment (set this in Render / locally)
+app.secret_key = os.getenv("SECRET_KEY", "change_this_for_dev_only")
 
-# Secret key for sessions
-app.secret_key = "billsmart-modern-secret"  # you can change this to any random string
-
-# Google OAuth2 config
-GOOGLE_CLIENT_ID = "736005593161-e13hjvcqlsepnpgrda18n6jl8f2rbnlp.apps.googleusercontent.com"
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-GOOGLE_REDIRECT_URI = "https://billsmartapp.onrender.com/google/callback"
-
-
+# -------------------------------------------------
 # SQLite DB configuration
+# -------------------------------------------------
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(BASE_DIR, "billsmart.db")
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL", "sqlite:///" + os.path.join(BASE_DIR, "billsmart.db")
+)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
-# -------------------------------------------------
-# Email configuration
-# -------------------------------------------------
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_ADDRESS = "alaganeshyadav@gmail.com"      # <-- your Gmail
-EMAIL_PASSWORD = "mpds ihcv rtrj jfhc"          # <-- your App Password
+# Migrate should be initialized after app & db
+from flask_migrate import Migrate
+migrate = Migrate(app, db)
 
 # -------------------------------------------------
-# WhatsApp Cloud API configuration
+# Email configuration (use env vars)
 # -------------------------------------------------
-WHATSAPP_TOKEN = "EAAT9oSJYbxwBQB3kgMAXoPZCquJKk9Py3lP2xqm460278jrhVLKNsy8RnaHWLZAdzQds0e5gPNmaJuCkERFjyDvuTrX4AEaAe16rdyAljZCZAV3PdbgQnzThFOZAhfCXiOs4DASghZAj7iIIRXRnkV6ZB4api8CnH6SaewbRVmZAvbvjufKvDsdww5AacwefPANc7wZDZD"
-PHONE_NUMBER_ID = "921622914361686"
-USER_WHATSAPP_NUMBER = "+919948190328"
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")  # your gmail
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")  # app password
 
-def send_email(to_email: str, subject: str, body: str):
-    """Helper to send plain text email."""
+# -------------------------------------------------
+# WhatsApp Cloud API configuration (env vars)
+# -------------------------------------------------
+WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")  # numeric id (no plus)
+# Note: DO NOT store user numbers here — store per-user in DB (User.phone)
+
+# -------------------------------------------------
+# Google OAuth2 config (prefer env)
+# -------------------------------------------------
+GOOGLE_CLIENT_ID = os.getenv(
+    "GOOGLE_CLIENT_ID",
+    "736005593161-e13hjvcqlsepnpgrda18n6jl8f2rbnlp.apps.googleusercontent.com",
+)
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "1")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/google/callback")
+
+# -------------------------------------------------
+# Helper: Email send functions
+# -------------------------------------------------
+def send_email_raw(to_email: str, subject: str, body: str):
+    """Generic plain-text email sender using configured SMTP credentials."""
+    if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+        app.logger.error("Email credentials missing (EMAIL_ADDRESS/EMAIL_PASSWORD)")
+        return False
+
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = EMAIL_ADDRESS
     msg["To"] = to_email
 
-    with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
-        server.starttls()
-        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_ADDRESS, [to_email], msg.as_string())
+    try:
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_ADDRESS, [to_email], msg.as_string())
+        app.logger.info("Email sent to %s", to_email)
+        return True
+    except Exception as e:
+        app.logger.exception("Failed to send email to %s: %s", to_email, e)
+        return False
 
+
+def send_welcome_email(to_email, name):
+    subject = "Welcome to BillSmart 🎉"
+    body = f"""Hi {name},
+
+👋 Welcome to BillSmart!
+You're now part of our smart billing system 😊
+Start adding your bills and we'll take care of reminders.
+
+Regards,
+BillSmart Team
+"""
+    return send_email_raw(to_email, subject, body)
+
+
+def send_email_reminder(user_email, user_name, bill):
+    subject = f"Reminder: {bill.title} due on {bill.due_date}"
+    body = f"""Hi {user_name},
+
+This is a reminder for your upcoming bill:
+
+Bill: {bill.title}
+Amount: ₹{bill.amount}
+Due Date: {bill.due_date}
+
+Please pay on time to avoid late fees.
+
+— BillSmart
+"""
+    return send_email_raw(user_email, subject, body)
+
+
+# -------------------------------------------------
+# Helper: WhatsApp send (simple text)
+# -------------------------------------------------
+def send_whatsapp_message(phone_number: str, message_text: str) -> bool:
+    """
+    Send a simple text WhatsApp message via Facebook Cloud API.
+    phone_number should be in international format, e.g. "9198XXXXXXXX" or "+9198XXXXXXXX".
+    """
+    token = WHATSAPP_TOKEN or os.getenv("WHATSAPP_TOKEN")
+    phone_id = PHONE_NUMBER_ID or os.getenv("PHONE_NUMBER_ID")
+    if not token or not phone_id:
+        app.logger.error("WhatsApp credentials missing")
+        return False
+
+    # ensure phone format — remove spaces
+    phone_number_clean = phone_number.replace(" ", "")
+    # Remove leading plus if present (Cloud API accepts without +)
+    if phone_number_clean.startswith("+"):
+        phone_number_clean = phone_number_clean[1:]
+
+    url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone_number_clean,
+        "type": "text",
+        "text": {"body": message_text}
+    }
+
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=10)
+        app.logger.info("WhatsApp send status %s -> %s", r.status_code, r.text)
+        return r.status_code in (200, 201)
+    except Exception as e:
+        app.logger.exception("WhatsApp request failed: %s", e)
+        return False
 
 
 # -------------------------------------------------
@@ -68,12 +166,12 @@ def send_email(to_email: str, subject: str, body: str):
 from flask_login import UserMixin
 
 class User(db.Model, UserMixin):
-
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
+    phone = db.Column(db.String(20), nullable=True)  # stored as international string e.g. 9198...
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -92,7 +190,7 @@ class Bill(db.Model):
 
 
 # -------------------------------------------------
-# Helper: login check
+# Helper: login check (decorator)
 # -------------------------------------------------
 def login_required(f):
     from functools import wraps
@@ -108,7 +206,7 @@ def login_required(f):
 
 
 # -------------------------------------------------
-# Routes
+# Routes (index, register, login, logout, dashboard)
 # -------------------------------------------------
 @app.route("/")
 def index():
@@ -122,39 +220,68 @@ def register():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()
+        phone = request.form.get("phone", "").strip()
         password = request.form.get("password", "").strip()
         confirm_password = request.form.get("confirm_password", "").strip()
 
-        if not name or not email or not password:
-            flash("All fields are required.", "danger")
-            return redirect(url_for("register"))
-
+        # Basic validation
         if password != confirm_password:
-            flash("Passwords do not match.", "danger")
+            flash("Passwords do not match!", "danger")
             return redirect(url_for("register"))
 
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            flash("Email already registered. Please log in.", "warning")
-            return redirect(url_for("login"))
+        if User.query.filter_by(email=email).first():
+            flash("Email already registered!", "danger")
+            return redirect(url_for("register"))
 
+        # Basic phone validate (digits, length)
+        phone_digits = "".join([c for c in phone if c.isdigit()])
+        if len(phone_digits) < 10:
+            flash("Enter a valid phone number (10+ digits).", "danger")
+            return redirect(url_for("register"))
+
+        # Hash password
         hashed_password = generate_password_hash(password)
-        new_user = User(name=name, email=email, password=hashed_password)
+
+        # Save user
+        new_user = User(
+            name=name,
+            email=email,
+            phone=phone_digits,
+            password=hashed_password
+        )
+
         db.session.add(new_user)
         db.session.commit()
 
-        flash("Registration successful! Please log in.", "success")
+        # Send welcome email (best-effort)
+        try:
+            send_welcome_email(new_user.email, new_user.name)
+        except Exception:
+            app.logger.exception("Failed to send welcome email")
+
+        # Send welcome WhatsApp (best-effort)
+        try:
+            if new_user.phone:
+                send_whatsapp_message(
+                    new_user.phone,
+                    f"Hi {new_user.name}, 👋 Welcome to BillSmart! You're now part of our smart billing system 😊"
+                )
+        except Exception:
+            app.logger.exception("Failed to send welcome WhatsApp")
+
+        flash("Account created successfully! Please log in.", "success")
         return redirect(url_for("login"))
 
+    # If GET request → show form
     return render_template("register.html")
+
+
 @app.route("/login/google")
 def login_google():
-    from google_auth_oauthlib.flow import Flow
-
     flow = Flow.from_client_config(
         {
             "web": {
-                "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+                "client_id": os.getenv("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID),
                 "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
@@ -169,7 +296,6 @@ def login_google():
     )
 
     flow.redirect_uri = GOOGLE_REDIRECT_URI
-
     auth_url, state = flow.authorization_url(
         prompt="consent",
         access_type="offline",
@@ -178,10 +304,6 @@ def login_google():
 
     session["state"] = state
     return redirect(auth_url)
-
-
-
-
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -257,7 +379,7 @@ def dashboard():
 
 
 # -------------------------------------------------
-# Email reminders (upcoming bills)
+# Email reminders (upcoming bills) - user can trigger
 # -------------------------------------------------
 @app.route("/send_reminders")
 @login_required
@@ -269,10 +391,9 @@ def send_reminders():
     upcoming = today + timedelta(days=2)
 
     bills = Bill.query.filter(
-    Bill.user_id == user_id,
-    Bill.status.ilike("pending")
-).order_by(Bill.due_date).all()
-
+        Bill.user_id == user_id,
+        Bill.status.ilike("pending")
+    ).order_by(Bill.due_date).all()
 
     if not bills:
         flash("No upcoming pending bills in the next 2 days.", "info")
@@ -287,17 +408,17 @@ def send_reminders():
     body = "\n".join(lines)
 
     try:
-        send_email(user.email, "Upcoming Bill Reminders - BillSmart", body)
+        send_email_raw(user.email, "Upcoming Bill Reminders - BillSmart", body)
         flash("Email reminders sent successfully! 📧", "success")
     except Exception as e:
-        print("EMAIL ERROR:", e)
+        app.logger.exception("EMAIL ERROR:")
         flash("Error sending email reminders. Check email configuration.", "danger")
 
     return redirect(url_for("dashboard"))
 
 
 # -------------------------------------------------
-# WhatsApp reminders (upcoming bills)
+# WhatsApp reminders (upcoming bills) - user can trigger
 # -------------------------------------------------
 @app.route("/send_whatsapp")
 @login_required
@@ -313,45 +434,30 @@ def send_whatsapp():
         return redirect(url_for("dashboard"))
 
     for b in bills:
-        print("SENDING:", user.name, b.title, b.amount, b.due_date)   # <-- sample output / debugging
+        app.logger.info("SENDING: %s %s %s %s", user.name, b.title, b.amount, b.due_date)
 
-        url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-            "Content-Type": "application/json"
-        }
+        # Compose a text message (simple)
+        whatsapp_text = (
+            f"Hi {user.name},\n"
+            f"Reminder: Your bill *{b.title}* of ₹{b.amount} is due on {b.due_date}.\n"
+            f"Please pay on time. - BillSmart"
+        )
 
-        data = {
-            "messaging_product": "whatsapp",
-            "to": USER_WHATSAPP_NUMBER,
-            "type": "template",
-            "template": {
-                "name": "bill_reminder",                # <-- your template name
-                "language": { "code": "en_US" },
-                "components": [
-                    {
-                        "type": "body",
-                        "parameters": [
-                            {"type": "text", "text": user.name},           # {{1}}
-                            {"type": "text", "text": b.title},             # {{2}}
-                            {"type": "text", "text": str(b.amount)},       # {{3}}
-                            {"type": "text", "text": str(b.due_date)}      # {{4}}
-                        ]
-                    }
-                ]
-            }
-        }
+        # Use user's phone (stored in user.phone)
+        if not user.phone:
+            app.logger.warning("User %s has no phone number, skipping WhatsApp send.", user.email)
+            continue
 
-        response = requests.post(url, json=data, headers=headers)
-        print("\nWHATSAPP RESPONSE:", response.text, "\n")
+        sent = send_whatsapp_message(user.phone, whatsapp_text)
+        if not sent:
+            app.logger.error("Failed to send WhatsApp to %s", user.phone)
 
     flash("WhatsApp bill reminders sent successfully! 📱", "success")
     return redirect(url_for("dashboard"))
 
 
-
 # -------------------------------------------------
-# Bill CRUD
+# Bill CRUD (add/edit/delete/list)
 # -------------------------------------------------
 @app.route("/add_bill", methods=["GET", "POST"])
 @login_required
@@ -443,13 +549,14 @@ def delete_bill(bill_id):
     db.session.commit()
     flash("Bill deleted successfully!", "info")
     return redirect(url_for("bills"))
+
+
 # -------------------------------
 # Export Bills to PDF and Excel
 # -------------------------------
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from io import BytesIO
-from flask import make_response
 import pandas as pd
 
 @app.route("/export_pdf")
@@ -507,6 +614,7 @@ def export_excel():
     response.headers['Content-Type'] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     response.headers['Content-Disposition'] = "attachment; filename=bills_report.xlsx"
     return response
+
 
 @app.route("/google/callback")
 def login_google_callback():
@@ -569,10 +677,6 @@ def login_google_callback():
     flash(f"Logged in with Google as {user.name}", "success")
 
     return redirect(url_for("dashboard"))
-
-
-
-
 
 
 # -------------------------------------------------
