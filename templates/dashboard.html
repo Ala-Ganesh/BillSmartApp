@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
+{% if show_phone_alert %}
+<div class="alert alert-info shadow-sm">
+    <strong>Add your Mobile Number!</strong><br>
+    To receive WhatsApp reminders, add your mobile number below.
+    <br><br>
+    <a href="{{ url_for('update_phone') }}" class="btn btn-primary btn-sm">
+        Add Mobile Number
+    </a>
+</div>
+{% endif %}
+
 <div class="row mb-4">
     <div class="col-md-8">
         <h2 class="fw-bold mb-1">Dashboard</h2>
