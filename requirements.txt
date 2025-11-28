@@ -46,3 +46,5 @@ certifi==2025.11.12
 pycparser==2.23
 cffi==2.0.0
 requests-oauthlib==2.0.0
+psycopg2-binary==2.9.9
+
