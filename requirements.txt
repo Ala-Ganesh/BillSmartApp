@@ -1,4 +1,4 @@
-flask_migrate
+Flask-Migrate==4.0.7
 Flask==3.0.0
 Flask_SQLAlchemy==3.1.1
 Flask-Login==0.6.3
