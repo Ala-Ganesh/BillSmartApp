@@ -679,6 +679,12 @@ def update_phone():
         return redirect("/dashboard")
 
     return render_template("update_phone.html", user=user)
+@app.route("/create_tables")
+def create_tables():
+    with app.app_context():
+        db.create_all()
+    return "Tables created successfully!"
+
 
 
 
