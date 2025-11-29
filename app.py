@@ -611,6 +611,36 @@ __all__ = [
     "send_whatsapp_message",
 ]
 # -------------------------------------------------
+# SAVE MOBILE (SWEETALERT POPUP)
+# -------------------------------------------------
+@app.route("/save_mobile", methods=["POST"])
+@login_required
+def save_mobile():
+    data = request.get_json()
+    phone = data.get("mobile", "")
+
+    # Clean digits
+    digits = "".join([c for c in phone if c.isdigit()])
+
+    if len(digits) < 10:
+        return {"status": "error", "message": "Invalid number"}, 400
+
+    user = User.query.get(session["user_id"])
+    user.phone = digits
+    db.session.commit()
+
+    # Update session
+    session["user_phone"] = digits
+
+    # Send WhatsApp Confirmation
+    send_whatsapp_message(
+        digits,
+        f"👋 Hello {user.name}! Your WhatsApp reminders are now ON. "
+        f"You will receive updates for upcoming bills & confirmations."
+    )
+
+    return {"status": "success"}
+# -------------------------------------------------
 # UPDATE PHONE NUMBER (NEW FEATURE)
 # -------------------------------------------------
 @app.route("/update_phone", methods=["GET", "POST"])
@@ -660,4 +690,7 @@ def update_phone():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
